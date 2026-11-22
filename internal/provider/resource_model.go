@@ -543,12 +543,27 @@ func (r *ModelResource) readModel(ctx context.Context, data *ModelResourceModel)
 	}
 
 	if litellmParams, ok := result["litellm_params"].(map[string]interface{}); ok {
-		// Update top-level attributes from API response.
-		// For optional attributes (tpm, rpm, merge_reasoning_content_in_choices),
-		// only update if the attribute was set in the config (!IsNull).
+		// For optional attributes, only update if the attribute was set in
+		// the config (!IsNull).
 		// Otherwise, values that exist in API but not in config would cause
 		// an infinite plan diff: plan wants to remove → PATCH can't delete
 		// (LiteLLM merges litellm_params) → Read sees it again → repeat.
+		floatParam := func(key string) (float64, bool) {
+			switch v := litellmParams[key].(type) {
+			case float64:
+				return v, true
+			case int:
+				return float64(v), true
+			case int64:
+				return float64(v), true
+			case string:
+				f, err := strconv.ParseFloat(v, 64)
+				return f, err == nil
+			default:
+				return 0, false
+			}
+		}
+
 		if provider, ok := litellmParams["custom_llm_provider"].(string); ok && provider != "" {
 			data.CustomLLMProvider = types.StringValue(provider)
 		}
@@ -570,6 +585,24 @@ func (r *ModelResource) readModel(ctx context.Context, data *ModelResourceModel)
 		if rpm, ok := litellmParams["rpm"].(int64); ok && !data.RPM.IsNull() {
 			data.RPM = types.Int64Value(rpm)
 		}
+		if cost, ok := floatParam("input_cost_per_token"); ok && !data.InputCostPerMillionTokens.IsNull() {
+			data.InputCostPerMillionTokens = types.Float64Value(cost * 1000000.0)
+		}
+		if cost, ok := floatParam("output_cost_per_token"); ok && !data.OutputCostPerMillionTokens.IsNull() {
+			data.OutputCostPerMillionTokens = types.Float64Value(cost * 1000000.0)
+		}
+		if cost, ok := floatParam("input_cost_per_pixel"); ok && !data.InputCostPerPixel.IsNull() {
+			data.InputCostPerPixel = types.Float64Value(cost)
+		}
+		if cost, ok := floatParam("output_cost_per_pixel"); ok && !data.OutputCostPerPixel.IsNull() {
+			data.OutputCostPerPixel = types.Float64Value(cost)
+		}
+		if cost, ok := floatParam("input_cost_per_second"); ok && !data.InputCostPerSecond.IsNull() {
+			data.InputCostPerSecond = types.Float64Value(cost)
+		}
+		if cost, ok := floatParam("output_cost_per_second"); ok && !data.OutputCostPerSecond.IsNull() {
+			data.OutputCostPerSecond = types.Float64Value(cost)
+		}
 		if awsRegion, ok := litellmParams["aws_region_name"].(string); ok && awsRegion != "" {
 			data.AWSRegionName = types.StringValue(awsRegion)
 		}
@@ -581,7 +614,6 @@ func (r *ModelResource) readModel(ctx context.Context, data *ModelResourceModel)
 		// via additional_litellm_params. Since templates commonly use additional_litellm_params,
 		// we let it flow through the additional params path to avoid drift-loop conflicts.
 
-		// Handle additional_litellm_params map - preserve state when API omits custom params.
 		knownLiteLLMParams := map[string]struct{}{
 			"custom_llm_provider":     {},
 			"model":                   {},

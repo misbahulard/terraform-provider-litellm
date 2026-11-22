@@ -850,6 +850,78 @@ func TestReadModelPreservesKnownParamsInAdditionalWhenUserConfigured(t *testing.
 	}
 }
 
+func TestReadModelUpdatesConfiguredPriceFields(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{
+					"model_name": "test-model",
+					"litellm_params": map[string]interface{}{
+						"custom_llm_provider":    "openai",
+						"model":                  "openai/test-model",
+						"input_cost_per_token":   0.000003,
+						"output_cost_per_token":  "0.000004",
+						"input_cost_per_pixel":   0.01,
+						"output_cost_per_pixel":  0.02,
+						"input_cost_per_second":  0.03,
+						"output_cost_per_second": 0.04,
+					},
+					"model_info": map[string]interface{}{
+						"base_model": "test-model",
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	r := &ModelResource{
+		client: &Client{
+			APIBase:    server.URL,
+			APIKey:     "test-key",
+			HTTPClient: server.Client(),
+		},
+	}
+
+	data := ModelResourceModel{
+		ID:                         types.StringValue("test-id"),
+		InputCostPerMillionTokens:  types.Float64Value(1),
+		OutputCostPerMillionTokens: types.Float64Value(2),
+		InputCostPerPixel:          types.Float64Value(0.1),
+		OutputCostPerPixel:         types.Float64Value(0.2),
+		InputCostPerSecond:         types.Float64Value(0.3),
+		OutputCostPerSecond:        types.Float64Value(0.4),
+		AccessGroups:               types.ListUnknown(types.StringType),
+		AdditionalLiteLLMParams:    types.MapNull(types.StringType),
+	}
+
+	if err := r.readModel(context.Background(), &data); err != nil {
+		t.Fatalf("readModel returned error: %v", err)
+	}
+
+	if got := data.InputCostPerMillionTokens.ValueFloat64(); got != 3 {
+		t.Fatalf("expected input cost per million tokens 3, got %v", got)
+	}
+	if got := data.OutputCostPerMillionTokens.ValueFloat64(); got != 4 {
+		t.Fatalf("expected output cost per million tokens 4, got %v", got)
+	}
+	if got := data.InputCostPerPixel.ValueFloat64(); got != 0.01 {
+		t.Fatalf("expected input cost per pixel 0.01, got %v", got)
+	}
+	if got := data.OutputCostPerPixel.ValueFloat64(); got != 0.02 {
+		t.Fatalf("expected output cost per pixel 0.02, got %v", got)
+	}
+	if got := data.InputCostPerSecond.ValueFloat64(); got != 0.03 {
+		t.Fatalf("expected input cost per second 0.03, got %v", got)
+	}
+	if got := data.OutputCostPerSecond.ValueFloat64(); got != 0.04 {
+		t.Fatalf("expected output cost per second 0.04, got %v", got)
+	}
+}
+
 func TestReadModelDoesNotSetModeWhenNull(t *testing.T) {
 	t.Parallel()
 
